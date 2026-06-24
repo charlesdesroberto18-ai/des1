@@ -1,15 +1,27 @@
 import React, { useState } from 'react';
 import { CalendarEvent } from './GoogleIntegration';
-import { Task } from '../types';
+import { Task, KanbanCard, Project, Medication, Consultation } from '../types';
 import { DynamicIcon } from './Icons';
 
 interface OverviewCalendarProps {
   calendarEvents: CalendarEvent[];
   localTasks: Task[];
+  kanbanCards?: KanbanCard[];
+  projects?: Project[];
+  medications?: Medication[];
+  consultations?: Consultation[];
   onAddLocalTask?: (task: Omit<Task, 'id' | 'source'>) => void;
 }
 
-export default function OverviewCalendar({ calendarEvents, localTasks, onAddLocalTask }: OverviewCalendarProps) {
+export default function OverviewCalendar({
+  calendarEvents,
+  localTasks,
+  kanbanCards = [],
+  projects = [],
+  medications = [],
+  consultations = [],
+  onAddLocalTask
+}: OverviewCalendarProps) {
   const [currentDate, setCurrentDate] = useState(new Date());
 
   const year = currentDate.getFullYear();
@@ -59,7 +71,6 @@ export default function OverviewCalendar({ calendarEvents, localTasks, onAddLoca
 
   // Fill in current month's days
   for (let i = 1; i <= totalDays; i++) {
-    const curMonthDate = new Date(year, month, i);
     // adjust timezone to local date string representation
     const localDateString = `${year}-${String(month + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
     dayCells.push({ day: i, isCurrentMonth: true, dateString: localDateString });
@@ -87,7 +98,35 @@ export default function OverviewCalendar({ calendarEvents, localTasks, onAddLoca
       return !task.completed && task.dueDate === dateString;
     });
 
-    return { events: dayEvents, tasks: dayTasks };
+    const dayCards = kanbanCards.filter((card) => {
+      return card.column !== 'done' && card.dueDate === dateString;
+    });
+
+    const dayAlerts: { title: string; projName: string }[] = [];
+    projects.forEach((proj) => {
+      proj.alerts?.forEach((alert) => {
+        if (alert.date === dateString) {
+          dayAlerts.push({ title: alert.title, projName: proj.name });
+        }
+      });
+    });
+
+    const dayMeds = medications.filter((med) => {
+      return med.startDate === dateString;
+    });
+
+    const dayConsultations = consultations.filter((cons) => {
+      return cons.date === dateString;
+    });
+
+    return {
+      events: dayEvents,
+      tasks: dayTasks,
+      cards: dayCards,
+      alerts: dayAlerts,
+      meds: dayMeds,
+      consultations: dayConsultations
+    };
   };
 
   return (
@@ -148,13 +187,24 @@ export default function OverviewCalendar({ calendarEvents, localTasks, onAddLoca
         <div className="grid grid-cols-7 gap-1.5">
           {dayCells.map((cell, idx) => {
             const isToday = cell.dateString === todayStr;
-            const { events, tasks } = getEventsAndTasksForDate(cell.dateString);
-            const hasItems = events.length > 0 || tasks.length > 0;
+            const { events, tasks, cards, alerts, meds, consultations: dayConsultations } = getEventsAndTasksForDate(cell.dateString);
+            
+            const totalCount = events.length + tasks.length + cards.length + alerts.length + meds.length + dayConsultations.length;
+            const hasItems = totalCount > 0;
+
+            // Gather all items as tiny display logs
+            const displayItems: { text: string; classes: string; key: string }[] = [];
+            events.forEach((e, i) => displayItems.push({ text: e.summary || '', classes: 'bg-amber-500/10 text-amber-300 border-amber-500/10', key: `e-${i}` }));
+            tasks.forEach((t, i) => displayItems.push({ text: t.text, classes: 'bg-emerald-500/10 text-emerald-300 border-emerald-500/10', key: `t-${i}` }));
+            cards.forEach((c, i) => displayItems.push({ text: `📋 ${c.title}`, classes: 'bg-indigo-500/10 text-indigo-300 border-indigo-500/10', key: `c-${i}` }));
+            alerts.forEach((a, i) => displayItems.push({ text: `🔔 [${a.projName}] ${a.title}`, classes: 'bg-rose-500/10 text-rose-300 border-rose-500/10', key: `a-${i}` }));
+            meds.forEach((m, i) => displayItems.push({ text: `💊 ${m.name} (${m.time})`, classes: 'bg-cyan-500/10 text-cyan-300 border-cyan-500/10', key: `m-${i}` }));
+            dayConsultations.forEach((c, i) => displayItems.push({ text: `🩺 Consulta: ${c.doctor}`, classes: 'bg-purple-500/10 text-purple-300 border-purple-500/10', key: `cs-${i}` }));
 
             return (
               <div
                 key={idx}
-                className={`min-h-[70px] sm:min-h-[85px] p-1.5 rounded-2xl border flex flex-col justify-between transition-all relative ${
+                className={`min-h-[85px] sm:min-h-[105px] p-2 rounded-2xl border flex flex-col justify-between transition-all relative ${
                   cell.isCurrentMonth
                     ? 'bg-white/[0.02] border-white/5'
                     : 'bg-black/15 border-transparent text-slate-600'
@@ -176,29 +226,29 @@ export default function OverviewCalendar({ calendarEvents, localTasks, onAddLoca
                   </span>
                   
                   {hasItems && (
-                    <div className="flex gap-1">
-                      {events.length > 0 && (
-                        <span className="h-1.5 w-1.5 rounded-full bg-amber-400 block" title={`${events.length} compromisso(s)`} />
-                      )}
-                      {tasks.length > 0 && (
-                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 block" title={`${tasks.length} tarefa(s) pendente(s)`} />
-                      )}
+                    <div className="flex flex-wrap gap-1 max-w-[40px] justify-end">
+                      {events.length > 0 && <span className="h-1.5 w-1.5 rounded-full bg-amber-400 block" title="Compromisso Google" />}
+                      {tasks.length > 0 && <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 block" title="Tarefa Local" />}
+                      {cards.length > 0 && <span className="h-1.5 w-1.5 rounded-full bg-indigo-400 block" title="Card Kanban" />}
+                      {alerts.length > 0 && <span className="h-1.5 w-1.5 rounded-full bg-rose-400 block" title="Alerta de Projeto" />}
+                      {meds.length > 0 && <span className="h-1.5 w-1.5 rounded-full bg-cyan-400 block" title="Medicamento Agendado" />}
+                      {dayConsultations.length > 0 && <span className="h-1.5 w-1.5 rounded-full bg-purple-400 block" title="Consulta Médica" />}
                     </div>
                   )}
                 </div>
 
-                {/* Day events visual overview on hover or brief preview on desktop */}
-                <div className="mt-1 space-y-1 overflow-hidden select-none pointer-events-none">
-                  {events.slice(0, 2).map((e, index) => (
-                    <div key={e.id || index} className="text-[8px] bg-amber-500/10 text-amber-300 px-1 py-0.5 rounded leading-tight truncate border border-amber-500/5 font-medium">
-                      {e.summary}
+                {/* Day events visual overview */}
+                <div className="mt-1.5 space-y-1 overflow-hidden select-none pointer-events-none flex-1">
+                  {displayItems.slice(0, 3).map((item) => (
+                    <div key={item.key} className={`text-[8px] px-1 py-0.5 rounded leading-tight truncate border font-medium ${item.classes}`}>
+                      {item.text}
                     </div>
                   ))}
-                  {tasks.slice(0, 2 - events.slice(0, 2).length).map((t, index) => (
-                    <div key={t.id || index} className="text-[8px] bg-emerald-500/10 text-emerald-300 px-1 py-0.5 rounded leading-tight truncate border border-emerald-500/5 font-medium">
-                      {t.text}
+                  {displayItems.length > 3 && (
+                    <div className="text-[7px] text-slate-500 font-extrabold pl-1">
+                      +{displayItems.length - 3} mais...
                     </div>
-                  ))}
+                  )}
                 </div>
               </div>
             );
@@ -207,14 +257,32 @@ export default function OverviewCalendar({ calendarEvents, localTasks, onAddLoca
       </div>
 
       {/* Legend */}
-      <div className="flex items-center justify-end gap-4 text-[10px] text-slate-500 font-bold pt-2 border-t border-white/5">
-        <div className="flex items-center gap-1.5">
-          <span className="h-2 w-2 rounded-full bg-amber-400 block" />
-          <span>Eventos Google</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <span className="h-2 w-2 rounded-full bg-emerald-400 block" />
-          <span>Tarefas Locais</span>
+      <div className="flex flex-wrap items-center justify-between gap-y-2 gap-x-4 text-[10px] text-slate-500 font-bold pt-3 border-t border-white/5">
+        <div className="flex flex-wrap gap-3">
+          <div className="flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-full bg-amber-400 block" />
+            <span>Eventos Google</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-full bg-emerald-400 block" />
+            <span>Tarefas Locais</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-full bg-indigo-400 block" />
+            <span>Projetos Kanban</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-full bg-rose-400 block" />
+            <span>Alertas</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-full bg-cyan-400 block" />
+            <span>Remédios</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-full bg-purple-400 block" />
+            <span>Consultas</span>
+          </div>
         </div>
         <div className="flex items-center gap-1.5">
           <span className="h-2.5 w-2.5 rounded-lg border border-indigo-500 bg-indigo-500/5 block" />

@@ -55,6 +55,7 @@ export default function FinanceCharts({ transactions }: FinanceChartsProps) {
     const dayTrans = transactions.filter((t) => t.date === date);
     const income = dayTrans.filter((t) => t.type === 'income').reduce((sum, t) => sum + t.amount, 0);
     const expense = dayTrans.filter((t) => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0);
+    const additional = dayTrans.filter((t) => t.type === 'additional').reduce((sum, t) => sum + t.amount, 0);
     
     // Format date as "DD/MM"
     const [_, month, day] = date.split('-');
@@ -65,6 +66,7 @@ export default function FinanceCharts({ transactions }: FinanceChartsProps) {
       date: formattedDate,
       Receitas: income,
       Despesas: expense,
+      Adicionais: additional,
     };
   });
 
@@ -118,7 +120,7 @@ export default function FinanceCharts({ transactions }: FinanceChartsProps) {
             <p
               key={idx}
               className={`text-sm font-bold ${
-                p.name === 'Receitas' ? 'text-emerald-400' : 'text-rose-400'
+                p.name === 'Receitas' ? 'text-emerald-400' : p.name === 'Adicionais' ? 'text-sky-400' : 'text-rose-400'
               }`}
             >
               {p.name}: {formatBRL(p.value)}
@@ -226,6 +228,7 @@ export default function FinanceCharts({ transactions }: FinanceChartsProps) {
               <Tooltip content={<CustomBarTooltip />} />
               <Legend verticalAlign="top" height={36} iconType="circle" wrapperStyle={{ fontSize: 12, color: '#94a3b8' }} />
               <Bar dataKey="Receitas" fill="#10b981" radius={[4, 4, 0, 0]} maxBarSize={30} />
+              <Bar dataKey="Adicionais" fill="#38bdf8" radius={[4, 4, 0, 0]} maxBarSize={30} />
               <Bar dataKey="Despesas" fill="#f43f5e" radius={[4, 4, 0, 0]} maxBarSize={30} />
             </BarChart>
           </ResponsiveContainer>

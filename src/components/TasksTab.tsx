@@ -20,7 +20,15 @@ export default function TasksTab({
   onToggleLocalTask,
   onDeleteLocalTask,
 }: TasksTabProps) {
-  const { isConnected, googleTasks, isLoadingTasks, addGoogleTask, toggleGoogleTaskState, refreshTasks, loginWithGoogle } = useGoogleAuth();
+  const {
+    isConnected,
+    googleTasks,
+    isLoadingTasks,
+    addGoogleTask,
+    toggleGoogleTaskState,
+    refreshTasks,
+    loginWithGoogle,
+  } = useGoogleAuth();
   const { toast } = useToast();
 
   const [activeSubTab, setActiveSubTab] = useState<'local' | 'google'>('local');
@@ -41,6 +49,9 @@ export default function TasksTab({
 
   // Google task form states
   const [googleNewText, setGoogleNewText] = useState('');
+  const [googleDueDate, setGoogleDueDate] = useState('');
+  const [googleReminderTime, setGoogleReminderTime] = useState('');
+  const [googleReminderActive, setGoogleReminderActive] = useState(false);
 
   const handleAddLocalSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -70,9 +81,19 @@ export default function TasksTab({
       toast.error('O título da tarefa não pode estar vazio!', 'Nome Vazio');
       return;
     }
-    await addGoogleTask(googleNewText.trim());
+    await addGoogleTask(
+      googleNewText.trim(),
+      googleDueDate || undefined,
+      googleReminderTime || undefined,
+      googleReminderActive && !!googleDueDate && !!googleReminderTime
+    );
     setGoogleNewText('');
+    setGoogleDueDate('');
+    setGoogleReminderTime('');
+    setGoogleReminderActive(false);
   };
+
+
 
   // Filter Local Tasks
   const filteredLocalTasks = localTasks.filter((t) => {
@@ -423,6 +444,40 @@ export default function TasksTab({
                     />
                   </div>
 
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase">Prazo Final</label>
+                      <input
+                        type="date"
+                        value={googleDueDate}
+                        onChange={(e) => setGoogleDueDate(e.target.value)}
+                        className="w-full bg-slate-900/60 border border-white/10 rounded-xl px-2 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase">Horário Alerta</label>
+                      <input
+                        type="time"
+                        value={googleReminderTime}
+                        onChange={(e) => setGoogleReminderTime(e.target.value)}
+                        className="w-full bg-slate-900/60 border border-white/10 rounded-xl px-2 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 p-2 bg-white/5 rounded-xl border border-white/5">
+                    <input
+                      type="checkbox"
+                      id="googleReminderActive"
+                      checked={googleReminderActive}
+                      onChange={(e) => setGoogleReminderActive(e.target.checked)}
+                      className="h-4 w-4 text-indigo-500 focus:ring-0 rounded bg-slate-900 border-white/10 cursor-pointer"
+                    />
+                    <label htmlFor="googleReminderActive" className="text-[10px] text-slate-300 font-medium cursor-pointer select-none">
+                      Ativar Alerta Dinâmico 🔔
+                    </label>
+                  </div>
+
                   <button
                     type="submit"
                     className="w-full bg-indigo-500 hover:bg-indigo-600 text-white text-xs font-bold h-10 rounded-xl flex items-center justify-center gap-2 transition-all shadow-md cursor-pointer"
@@ -474,12 +529,20 @@ export default function TasksTab({
                               <p className={`text-xs font-medium text-white ${isComp ? 'line-through text-slate-500' : ''}`}>
                                 {task.title}
                               </p>
-                              {task.due && (
-                                <span className="text-[9px] text-slate-500 flex items-center gap-1 mt-0.5">
-                                  <DynamicIcon name="Calendar" size={10} />
-                                  Vence em: {new Date(task.due).toLocaleDateString('pt-BR')}
-                                </span>
-                              )}
+                              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-0.5">
+                                {task.due && (
+                                  <span className="text-[9px] text-slate-500 flex items-center gap-1">
+                                    <DynamicIcon name="Calendar" size={10} />
+                                    Vence em: {new Date(task.due).toLocaleDateString('pt-BR')}
+                                  </span>
+                                )}
+                                {task.reminderActive && (
+                                  <span className="text-[9px] text-amber-400 flex items-center gap-1 font-mono font-bold animate-pulse">
+                                    <DynamicIcon name="Bell" size={10} />
+                                    Alerta: {task.reminderTime}
+                                  </span>
+                                )}
+                              </div>
                             </div>
                           </div>
                         </div>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Transaction, Budget, SavingsGoal, Task, LifeGoal, HealthLog, KanbanCard, Course, StudyNote } from './types';
+import { Transaction, Budget, SavingsGoal, Task, LifeGoal, HealthLog, KanbanCard, Course, StudyNote, Medication, Consultation, Habit, Project } from './types';
 import {
   INITIAL_TRANSACTIONS,
   INITIAL_BUDGETS,
@@ -18,11 +18,16 @@ import TasksTab from './components/TasksTab';
 import GoalsTab from './components/GoalsTab';
 import HealthTab from './components/HealthTab';
 import ProjectsTab from './components/ProjectsTab';
+import NotesTab from './components/NotesTab';
+import WorkTab from './components/WorkTab';
+import DashboardMap from './components/DashboardMap';
+import GoogleSheetsSync from './components/GoogleSheetsSync';
+import LoginGate from './components/LoginGate';
 import { useGoogleAuth } from './components/GoogleIntegration';
 
 export default function App() {
   const { toast } = useToast();
-  const { isConnected, calendarEvents, loginWithGoogle, toggleGoogleTaskState } = useGoogleAuth();
+  const { isConnected, calendarEvents, loginWithGoogle, logoutGoogle, toggleGoogleTaskState, googleTasks, googleKeepNotes, refreshTasks, updateKeepNoteReminders } = useGoogleAuth();
 
   // 1. Core States loaded from localStorage
   const [transactions, setTransactions] = useState<Transaction[]>(() => {
@@ -97,6 +102,39 @@ export default function App() {
     ];
   });
 
+  const [projects, setProjects] = useState<Project[]>(() => {
+    const saved = localStorage.getItem('personal_projects');
+    return saved ? JSON.parse(saved) : [
+      { id: 'p1', name: 'Trabalho', description: 'Lançamentos e sprint do escritório', coverImage: '', annotations: 'Anotações iniciais do projeto de trabalho.', progress: 40, alerts: [], journey: [], createdAt: '2026-06-24' },
+      { id: 'p2', name: 'Pessoal', description: 'Organização de finanças, hábitos e saúde', coverImage: '', annotations: 'Planejamento pessoal completo integrado à agenda.', progress: 60, alerts: [], journey: [], createdAt: '2026-06-24' }
+    ];
+  });
+
+  const [medications, setMedications] = useState<Medication[]>(() => {
+    const saved = localStorage.getItem('personal_medications');
+    return saved ? JSON.parse(saved) : [
+      { id: 'med1', name: 'Vitamina D', time: '08:00', timesPerDay: 1, remainingDoses: 15, totalDoses: 30, reminderActive: true },
+      { id: 'med2', name: 'Alergogard', time: '21:00', timesPerDay: 1, remainingDoses: 3, totalDoses: 20, reminderActive: true }
+    ];
+  });
+
+  const [consultations, setConsultations] = useState<Consultation[]>(() => {
+    const saved = localStorage.getItem('personal_consultations');
+    return saved ? JSON.parse(saved) : [
+      { id: 'c1', doctor: 'Dr. Roberto Santos', specialty: 'Cardiologia', date: '2026-07-15', time: '14:30', notes: 'Levar exames de sangue', isPast: false, reminderActive: true },
+      { id: 'c2', doctor: 'Dra. Cláudia Lima', specialty: 'Dermatologia', date: '2026-05-10', time: '10:00', notes: 'Check-up de rotina', isPast: true, reminderActive: false }
+    ];
+  });
+
+  const [habits, setHabits] = useState<Habit[]>(() => {
+    const saved = localStorage.getItem('personal_habits');
+    return saved ? JSON.parse(saved) : [
+      { id: 'h1', name: 'Pegar Sol Pela Manhã', type: 'outdoor', completedDays: [true, false, true, false, false, false, false], targetWeeks: 1, streakWeeks: 0 },
+      { id: 'h2', name: 'Beber 3L de Água', type: 'water', completedDays: [true, true, false, false, false, false, false], targetWeeks: 1, streakWeeks: 2 },
+      { id: 'h3', name: 'Caminhada Curta Diária', type: 'weekly_walk', completedDays: [true, true, true, false, false, false, false], targetWeeks: 1, streakWeeks: 1 }
+    ];
+  });
+
   // Sidebar navigation and UI states
   const [activeTab, setActiveTab] = useState<string>('overview');
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
@@ -107,7 +145,7 @@ export default function App() {
   const [financePeriodFilter, setFinancePeriodFilter] = useState<'all' | 'day' | 'week'>('all');
 
   // Quick transaction direct action states
-  const [showQuickTxModal, setShowQuickTxModal] = useState<'income' | 'expense' | null>(null);
+  const [showQuickTxModal, setShowQuickTxModal] = useState<'income' | 'expense' | 'additional' | null>(null);
   const [quickTxAmount, setQuickTxAmount] = useState<string>('');
   const [quickTxDescription, setQuickTxDescription] = useState<string>('');
   const [quickTxCategory, setQuickTxCategory] = useState<string>('Outros');
@@ -158,7 +196,23 @@ export default function App() {
     localStorage.setItem('personal_study_notes', JSON.stringify(studyNotes));
   }, [studyNotes]);
 
-  // Background service for active reminders (Tasks and KanbanCards)
+  useEffect(() => {
+    localStorage.setItem('personal_projects', JSON.stringify(projects));
+  }, [projects]);
+
+  useEffect(() => {
+    localStorage.setItem('personal_medications', JSON.stringify(medications));
+  }, [medications]);
+
+  useEffect(() => {
+    localStorage.setItem('personal_consultations', JSON.stringify(consultations));
+  }, [consultations]);
+
+  useEffect(() => {
+    localStorage.setItem('personal_habits', JSON.stringify(habits));
+  }, [habits]);
+
+  // Background service for active reminders (Tasks, KanbanCards, Google Tasks and Keep Notes)
   useEffect(() => {
     const interval = setInterval(() => {
       const now = new Date();
@@ -244,10 +298,190 @@ export default function App() {
         return updated ? nextCards : prev;
       });
 
+      // Check Google Tasks
+      if (googleTasks && googleTasks.length > 0) {
+        googleTasks.forEach((gTask) => {
+          if (
+            gTask.due === dateStr &&
+            gTask.reminderTime === timeStr &&
+            gTask.reminderActive &&
+            !gTask.reminderTriggered
+          ) {
+            // Trigger reminder toast
+            toast.info(`Google Task: "${gTask.title}" está agendada para agora!`, `Lembrete Ativo 🔔`);
+            
+            try {
+              const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+              const oscillator = audioCtx.createOscillator();
+              const gainNode = audioCtx.createGain();
+              oscillator.connect(gainNode);
+              gainNode.connect(audioCtx.destination);
+              oscillator.type = 'sine';
+              oscillator.frequency.setValueAtTime(698.46, audioCtx.currentTime); // F5 note
+              gainNode.gain.setValueAtTime(0.08, audioCtx.currentTime);
+              oscillator.start();
+              oscillator.stop(audioCtx.currentTime + 0.15);
+            } catch (e) {}
+
+            // Save triggered status in localStorage
+            const meta = {
+              reminderTime: gTask.reminderTime,
+              reminderActive: false,
+              reminderTriggered: true,
+            };
+            localStorage.setItem(`g_task_rem_${gTask.id}`, JSON.stringify(meta));
+            
+            // Trigger a refresh
+            refreshTasks();
+          }
+        });
+      }
+
+      // Check Google Keep Notes
+      if (googleKeepNotes && googleKeepNotes.length > 0) {
+        googleKeepNotes.forEach((note) => {
+          if (
+            note.dueDate === dateStr &&
+            note.reminderTime === timeStr &&
+            note.reminderActive &&
+            !note.reminderTriggered
+          ) {
+            // Trigger reminder toast
+            toast.info(`Google Keep: "${note.title}" está agendada para agora!`, `Lembrete Ativo 🔔`);
+            
+            try {
+              const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+              const oscillator = audioCtx.createOscillator();
+              const gainNode = audioCtx.createGain();
+              oscillator.connect(gainNode);
+              gainNode.connect(audioCtx.destination);
+              oscillator.type = 'sine';
+              oscillator.frequency.setValueAtTime(783.99, audioCtx.currentTime); // G5 note
+              gainNode.gain.setValueAtTime(0.08, audioCtx.currentTime);
+              oscillator.start();
+              oscillator.stop(audioCtx.currentTime + 0.15);
+            } catch (e) {}
+
+            // Save triggered state back to context/localStorage
+            updateKeepNoteReminders(note.id, false, true);
+          }
+        });
+      }
+
+      // Check Project Alerts
+      setProjects((prev) => {
+        let updated = false;
+        const nextProjects = prev.map((proj) => {
+          if (!proj.alerts) return proj;
+          let alertUpdated = false;
+          const updatedAlerts = proj.alerts.map((alert) => {
+            if (
+              alert.date === dateStr &&
+              alert.time === timeStr &&
+              alert.reminderActive &&
+              !alert.reminderTriggered
+            ) {
+              toast.info(`Projeto "${proj.name}": "${alert.title}" está agendado para agora!`, `Lembrete Ativo 🔔`);
+              try {
+                const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+                const oscillator = audioCtx.createOscillator();
+                const gainNode = audioCtx.createGain();
+                oscillator.connect(gainNode);
+                gainNode.connect(audioCtx.destination);
+                oscillator.type = 'sine';
+                oscillator.frequency.setValueAtTime(587.33, audioCtx.currentTime);
+                gainNode.gain.setValueAtTime(0.08, audioCtx.currentTime);
+                oscillator.start();
+                oscillator.stop(audioCtx.currentTime + 0.15);
+              } catch (e) {}
+              alertUpdated = true;
+              return { ...alert, reminderTriggered: true, reminderActive: false };
+            }
+            return alert;
+          });
+          if (alertUpdated) {
+            updated = true;
+            return { ...proj, alerts: updatedAlerts };
+          }
+          return proj;
+        });
+        return updated ? nextProjects : prev;
+      });
+
+      // Check Medications
+      setMedications((prev) => {
+        let updated = false;
+        const nextMeds = prev.map((med) => {
+          if (
+            (!med.startDate || med.startDate === dateStr) &&
+            med.time === timeStr &&
+            med.reminderActive &&
+            !med.reminderTriggered
+          ) {
+            toast.info(`Medicamento: Hora de tomar "${med.name}" (${med.time})! Doses restantes: ${med.remainingDoses - 1}`, `Hora do Remédio 💊`);
+            try {
+              const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+              const oscillator = audioCtx.createOscillator();
+              const gainNode = audioCtx.createGain();
+              oscillator.connect(gainNode);
+              gainNode.connect(audioCtx.destination);
+              oscillator.type = 'sine';
+              oscillator.frequency.setValueAtTime(523.25, audioCtx.currentTime);
+              gainNode.gain.setValueAtTime(0.08, audioCtx.currentTime);
+              oscillator.start();
+              oscillator.stop(audioCtx.currentTime + 0.15);
+            } catch (e) {}
+            
+            const nextRemaining = Math.max(0, med.remainingDoses - 1);
+            if (nextRemaining <= 3 && nextRemaining > 0) {
+              toast.warning(`Atenção: O medicamento "${med.name}" está acabando! Restam apenas ${nextRemaining} doses.`, `Estoque Baixo ⚠️`);
+            } else if (nextRemaining === 0) {
+              toast.error(`Atenção: O medicamento "${med.name}" acabou!`, `Sem Estoque 🚨`);
+            }
+            
+            updated = true;
+            return { ...med, remainingDoses: nextRemaining, reminderTriggered: true, reminderActive: false };
+          }
+          return med;
+        });
+        return updated ? nextMeds : prev;
+      });
+
+      // Check Consultations
+      setConsultations((prev) => {
+        let updated = false;
+        const nextConsultations = prev.map((cons) => {
+          if (
+            cons.date === dateStr &&
+            cons.time === timeStr &&
+            cons.reminderActive &&
+            !cons.reminderTriggered
+          ) {
+            toast.info(`Consulta: Sua consulta com "${cons.doctor}" (${cons.specialty}) é agora às ${cons.time}!`, `Lembrete de Consulta 🩺`);
+            try {
+              const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+              const oscillator = audioCtx.createOscillator();
+              const gainNode = audioCtx.createGain();
+              oscillator.connect(gainNode);
+              gainNode.connect(audioCtx.destination);
+              oscillator.type = 'sine';
+              oscillator.frequency.setValueAtTime(698.46, audioCtx.currentTime);
+              gainNode.gain.setValueAtTime(0.08, audioCtx.currentTime);
+              oscillator.start();
+              oscillator.stop(audioCtx.currentTime + 0.15);
+            } catch (e) {}
+            updated = true;
+            return { ...cons, reminderTriggered: true, reminderActive: false };
+          }
+          return cons;
+        });
+        return updated ? nextConsultations : prev;
+      });
+
     }, 15000); // Check every 15 seconds for reminders
 
     return () => clearInterval(interval);
-  }, [toast]);
+  }, [toast, googleTasks, googleKeepNotes, refreshTasks, updateKeepNoteReminders, setProjects, setMedications, setConsultations]);
 
   // 3. Filter transactions based on Day / Week / All
   const filteredTransactions = useMemo(() => {
@@ -277,11 +511,15 @@ export default function App() {
       .filter((t) => t.type === 'income')
       .reduce((sum, t) => sum + t.amount, 0);
 
+    const additional = filteredTransactions
+      .filter((t) => t.type === 'additional')
+      .reduce((sum, t) => sum + t.amount, 0);
+
     const expense = filteredTransactions
       .filter((t) => t.type === 'expense')
       .reduce((sum, t) => sum + t.amount, 0);
 
-    const balance = income - expense;
+    const balance = (income + additional) - expense;
 
     const totalSavedInGoals = goals.reduce((sum, g) => sum + g.currentAmount, 0);
 
@@ -297,6 +535,7 @@ export default function App() {
 
     return {
       income,
+      additional,
       expense,
       balance,
       totalSavedInGoals,
@@ -487,6 +726,10 @@ export default function App() {
     setKanbanCards((prev) => prev.filter((c) => c.id !== id));
   };
 
+  const handleUpdateCard = (updatedCard: KanbanCard) => {
+    setKanbanCards((prev) => prev.map((c) => (c.id === updatedCard.id ? updatedCard : c)));
+  };
+
   const handleAddCourse = (course: Omit<Course, 'id'>) => {
     const newCourse: Course = {
       ...course,
@@ -639,7 +882,9 @@ export default function App() {
   const navItems = [
     { id: 'overview', name: 'Visão Geral', icon: 'Layers', desc: 'Sua central diária' },
     { id: 'finance', name: 'Finanças Pessoais', icon: 'DollarSign', desc: 'Fluxo, tetos e extrato' },
+    { id: 'work', name: 'Controle de Trabalho', icon: 'Briefcase', desc: 'Escalas, freelances e diárias' },
     { id: 'tasks', name: 'Tarefas & Google', icon: 'CheckSquare', desc: 'Listas e sincronização' },
+    { id: 'notes', name: 'Notas (Google Keep)', icon: 'Lightbulb', desc: 'Sincronização e notas rápidas' },
     { id: 'goals', name: 'Metas e Sonhos', icon: 'Target', desc: 'Objetivos e poupança' },
     { id: 'health', name: 'Saúde e Hábitos', icon: 'HeartPulse', desc: 'Água, passos e sono' },
     { id: 'projects', name: 'Kanban Projetos', icon: 'ClipboardList', desc: 'Quadros de sprint' },
@@ -666,6 +911,10 @@ export default function App() {
     });
     return totalGpaWeighted / totalCredits;
   }, [courses]);
+
+  if (!isConnected) {
+    return <LoginGate />;
+  }
 
   return (
     <div className="min-h-screen glass-bg text-slate-100 font-sans antialiased flex flex-col lg:flex-row">
@@ -1013,7 +1262,14 @@ export default function App() {
                       <p className="text-[11px] text-slate-400">Calendário de eventos sincronizado com o Google Workspace</p>
                     </div>
                   </div>
-                  <OverviewCalendar calendarEvents={calendarEvents} localTasks={localTasks} />
+                  <OverviewCalendar
+                    calendarEvents={calendarEvents}
+                    localTasks={localTasks}
+                    kanbanCards={kanbanCards}
+                    projects={projects}
+                    medications={medications}
+                    consultations={consultations}
+                  />
                 </div>
 
                 {/* Prioritized Tasks (Ordered by priority High first, then proximity) */}
@@ -1167,40 +1423,84 @@ export default function App() {
                 </div>
 
                 {/* Big Metric Badges & Action Buttons */}
-                <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-center">
-                  <div className="md:col-span-8 grid grid-cols-1 sm:grid-cols-2 gap-5">
-                    {/* Saldo Atualizado Display */}
-                    <div className="rounded-2xl bg-white/[0.02] border border-white/5 p-5 space-y-2">
-                      <span className="text-[10px] text-indigo-400 font-extrabold uppercase tracking-wider block">Saldo Atualizado</span>
-                      <h3 className={`text-2xl font-black font-mono tracking-tight ${metrics.balance >= 0 ? 'text-indigo-400' : 'text-rose-400'}`}>
-                        {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(metrics.balance)}
+                <div className="space-y-6">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    {/* Saldo Principal (Income) */}
+                    <div className="rounded-2xl bg-white/[0.02] border border-white/5 p-4 space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] text-emerald-400 font-extrabold uppercase tracking-wider">Saldo (Receitas)</span>
+                        <span className="text-xs">💰</span>
+                      </div>
+                      <h3 className="text-lg font-black font-mono tracking-tight text-emerald-400">
+                        {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(metrics.income)}
                       </h3>
-                      <p className="text-[10px] text-slate-500">Saldo líquido com base no período selecionado</p>
+                      <p className="text-[9px] text-slate-500">Ganhos e depósitos principais</p>
                     </div>
 
-                    {/* Despesas Atualizadas Display */}
-                    <div className="rounded-2xl bg-white/[0.02] border border-white/5 p-5 space-y-2">
-                      <span className="text-[10px] text-rose-400 font-extrabold uppercase tracking-wider block">Despesas Atualizadas</span>
-                      <h3 className="text-2xl font-black font-mono tracking-tight text-rose-400">
+                    {/* Adicionais */}
+                    <div className="rounded-2xl bg-white/[0.02] border border-white/5 p-4 space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] text-sky-450 font-extrabold uppercase tracking-wider">Adicionais (Extras)</span>
+                        <span className="text-xs">⚡</span>
+                      </div>
+                      <h3 className="text-lg font-black font-mono tracking-tight text-sky-400">
+                        {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(metrics.additional)}
+                      </h3>
+                      <p className="text-[9px] text-slate-500">Rendas extras, freelas e bônus</p>
+                    </div>
+
+                    {/* Despesas */}
+                    <div className="rounded-2xl bg-white/[0.02] border border-white/5 p-4 space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] text-rose-400 font-extrabold uppercase tracking-wider">Despesas (Saídas)</span>
+                        <span className="text-xs">📉</span>
+                      </div>
+                      <h3 className="text-lg font-black font-mono tracking-tight text-rose-400">
                         {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(metrics.expense)}
                       </h3>
-                      <p className="text-[10px] text-slate-500">Total de saídas no filtro atual</p>
+                      <p className="text-[9px] text-slate-500">Total de saídas registradas</p>
+                    </div>
+
+                    {/* Saldo Líquido Final */}
+                    <div className="rounded-2xl bg-indigo-500/5 border border-indigo-500/15 p-4 space-y-1 shadow-lg shadow-indigo-950/20">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] text-indigo-400 font-extrabold uppercase tracking-wider">Saldo Final Atualizado</span>
+                        <span className="text-xs">🏦</span>
+                      </div>
+                      <h3 className={`text-lg font-black font-mono tracking-tight ${metrics.balance >= 0 ? 'text-indigo-400' : 'text-rose-400'}`}>
+                        {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(metrics.balance)}
+                      </h3>
+                      <p className="text-[9px] text-slate-450">Líquido (Saldo + Adicionais - Despesas)</p>
                     </div>
                   </div>
 
-                  {/* Quick Action Buttons */}
-                  <div className="md:col-span-4 flex flex-col sm:flex-row md:flex-col gap-3">
+                  {/* Quick Action Buttons for the three types */}
+                  <div className="flex flex-wrap gap-3">
                     <button
                       onClick={() => setShowQuickTxModal(showQuickTxModal === 'income' ? null : 'income')}
-                      className="flex-1 bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-3 px-4 rounded-xl text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md"
+                      className={`flex-1 min-w-[140px] font-bold py-2.5 px-4 rounded-xl text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md ${
+                        showQuickTxModal === 'income' ? 'bg-emerald-600 text-white ring-2 ring-emerald-500' : 'bg-emerald-500 hover:bg-emerald-600 text-slate-950'
+                      }`}
                     >
                       <DynamicIcon name="PlusCircle" size={14} />
                       <span>Adicionar Saldo</span>
                     </button>
 
                     <button
+                      onClick={() => setShowQuickTxModal(showQuickTxModal === 'additional' ? null : 'additional')}
+                      className={`flex-1 min-w-[140px] font-bold py-2.5 px-4 rounded-xl text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md ${
+                        showQuickTxModal === 'additional' ? 'bg-sky-600 text-white ring-2 ring-sky-500' : 'bg-sky-500 hover:bg-sky-600 text-slate-950'
+                      }`}
+                    >
+                      <DynamicIcon name="Sparkles" size={14} />
+                      <span>Adicionar Adicional</span>
+                    </button>
+
+                    <button
                       onClick={() => setShowQuickTxModal(showQuickTxModal === 'expense' ? null : 'expense')}
-                      className="flex-1 bg-rose-500 hover:bg-rose-600 text-white font-bold py-3 px-4 rounded-xl text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md"
+                      className={`flex-1 min-w-[140px] font-bold py-2.5 px-4 rounded-xl text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md ${
+                        showQuickTxModal === 'expense' ? 'bg-rose-600 text-white ring-2 ring-rose-500' : 'bg-rose-500 hover:bg-rose-600 text-white'
+                      }`}
                     >
                       <DynamicIcon name="MinusCircle" size={14} />
                       <span>Adicionar Despesa</span>
@@ -1217,7 +1517,13 @@ export default function App() {
                     <div className="flex justify-between items-center border-b border-white/5 pb-2.5">
                       <h4 className="text-xs font-bold text-white flex items-center gap-1.5 uppercase tracking-wider">
                         <DynamicIcon name="Sparkles" size={13} className="text-indigo-400" />
-                        Lançamento Rápido: {showQuickTxModal === 'income' ? 'Novo Saldo (Receita)' : 'Nova Despesa (Saída)'}
+                        Lançamento Rápido: {
+                          showQuickTxModal === 'income' 
+                            ? 'Novo Saldo (Receita)' 
+                            : showQuickTxModal === 'additional' 
+                              ? 'Novo Ganho Adicional' 
+                              : 'Nova Despesa (Saída)'
+                        }
                       </h4>
                       <button
                         type="button"
@@ -1297,6 +1603,25 @@ export default function App() {
                 </div>
                 <FinanceCharts transactions={filteredTransactions} />
               </div>
+
+              {/* Google Sheets Sync integration card */}
+              <GoogleSheetsSync
+                transactions={transactions}
+                onSyncTransactions={(synced) => {
+                  setTransactions(synced);
+                }}
+              />
+            </div>
+          )}
+
+          {/* TAB 2.5: CONTROLE DE TRABALHO & FREELANCE */}
+          {activeTab === 'work' && (
+            <div className="animate-fade-in">
+              <WorkTab
+                transactions={transactions}
+                onAddTransaction={(tx) => setTransactions((prev) => [tx, ...prev])}
+                onDeleteTransaction={(id) => setTransactions((prev) => prev.filter((t) => t.id !== id))}
+              />
             </div>
           )}
 
@@ -1309,6 +1634,13 @@ export default function App() {
                 onToggleLocalTask={handleToggleLocalTask}
                 onDeleteLocalTask={handleDeleteLocalTask}
               />
+            </div>
+          )}
+
+          {/* TAB 3.5: GOOGLE KEEP NOTES */}
+          {activeTab === 'notes' && (
+            <div className="animate-fade-in">
+              <NotesTab />
             </div>
           )}
 
@@ -1334,6 +1666,12 @@ export default function App() {
               <HealthTab
                 healthLog={healthLog}
                 onUpdateHealth={handleUpdateHealth}
+                medications={medications}
+                setMedications={setMedications}
+                consultations={consultations}
+                setConsultations={setConsultations}
+                habits={habits}
+                setHabits={setHabits}
               />
             </div>
           )}
@@ -1346,6 +1684,9 @@ export default function App() {
                 onAddCard={handleAddCard}
                 onMoveCard={handleMoveCard}
                 onDeleteCard={handleDeleteCard}
+                onUpdateCard={handleUpdateCard}
+                projects={projects}
+                setProjects={setProjects}
               />
             </div>
           )}
@@ -1457,6 +1798,58 @@ export default function App() {
                       </button>
                     </div>
                   </div>
+                </div>
+              </div>
+
+              {/* Google Connection Status Panel */}
+              <div className="rounded-3xl border border-white/5 bg-slate-900/40 p-6 shadow-xl space-y-5">
+                <div className="flex items-center justify-between border-b border-white/5 pb-3">
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-200 flex items-center gap-2">
+                      <DynamicIcon name="LockKeyhole" size={16} className="text-emerald-400" />
+                      Sincronização da Conta Google
+                    </h3>
+                    <p className="text-xs text-slate-400">Gerencie a conexão e integridade da sua sessão Google</p>
+                  </div>
+                  <span className="text-[10px] bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-extrabold px-3 py-1 rounded-xl uppercase flex items-center gap-1.5">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-ping" />
+                    Ativo
+                  </span>
+                </div>
+
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-slate-950/40 p-4 rounded-2xl border border-white/5">
+                  <div className="space-y-1">
+                    <span className="text-[9px] text-slate-500 font-extrabold uppercase tracking-wider block">E-mail Vinculado</span>
+                    <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
+                      <svg viewBox="0 0 24 24" className="h-4 w-4 shrink-0">
+                        <path
+                          fill="#EA4335"
+                          d="M12 5.04c1.64 0 3.12.56 4.28 1.67l3.2-3.2C17.52 1.58 14.96 1 12 1 7.35 1 3.4 3.65 1.56 7.56l3.85 3C6.31 7.56 8.92 5.04 12 5.04z"
+                        />
+                        <path
+                          fill="#4285F4"
+                          d="M23.49 12.27c0-.81-.07-1.6-.2-2.3H12v4.51h6.46c-.29 1.48-1.14 2.73-2.4 3.58l3.73 2.9c2.18-2.01 3.7-4.99 3.7-8.69z"
+                        />
+                        <path
+                          fill="#FBBC05"
+                          d="M5.41 10.56c-.24-.72-.37-1.49-.37-2.28 0-.79.13-1.56.37-2.28L1.56 3a11.93 11.93 0 0 0 0 10.56l3.85-3z"
+                        />
+                        <path
+                          fill="#34A853"
+                          d="M12 18.96c-3.08 0-5.69-2.52-6.59-5.52l-3.85 3a11.94 11.94 0 0 0 10.44 6.56c3.24 0 5.96-1.07 7.95-2.91l-3.73-2.9c-1.1.74-2.5 1.17-4.22 1.17z"
+                        />
+                      </svg>
+                      charlesdesroberto18@gmail.com
+                    </h4>
+                  </div>
+
+                  <button
+                    onClick={logoutGoogle}
+                    className="bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/25 text-rose-400 font-extrabold px-4 py-2 rounded-xl text-[10px] uppercase tracking-wider flex items-center gap-1.5 cursor-pointer transition-all self-stretch sm:self-auto justify-center"
+                  >
+                    <DynamicIcon name="X" size={12} />
+                    Desconectar Google
+                  </button>
                 </div>
               </div>
 
