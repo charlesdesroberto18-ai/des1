@@ -1,0 +1,6 @@
+{
+  "name": "Dashboard de Finanças Pessoais",
+  "description": "Um dashboard completo para gerenciar receitas, despesas, orçamentos, simulador de metas CDI e perfil personalizável com imagem e nome.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
