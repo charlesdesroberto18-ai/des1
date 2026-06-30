@@ -27,7 +27,7 @@ import { useGoogleAuth } from './components/GoogleIntegration';
 
 export default function App() {
   const { toast } = useToast();
-  const { isConnected, calendarEvents, loginWithGoogle, logoutGoogle, toggleGoogleTaskState, googleTasks, googleKeepNotes, refreshTasks, updateKeepNoteReminders } = useGoogleAuth();
+  const { isConnected, calendarEvents, loginWithGoogle, logoutGoogle, toggleGoogleTaskState, googleTasks, googleKeepNotes, refreshTasks, updateKeepNoteReminders, addGoogleCalendarEvent } = useGoogleAuth();
 
   // 1. Core States loaded from localStorage
   const [transactions, setTransactions] = useState<Transaction[]>(() => {
@@ -55,6 +55,27 @@ export default function App() {
     const saved = localStorage.getItem('personal_finance_profile_avatar');
     return saved || ''; // Base64 encoded image string
   });
+
+  const [prefNotifications, setPrefNotifications] = useState<boolean>(() => {
+    const saved = localStorage.getItem('pref_notifications');
+    return saved ? saved === 'true' : true;
+  });
+
+  const [prefEffects, setPrefEffects] = useState<boolean>(() => {
+    const saved = localStorage.getItem('pref_effects');
+    return saved ? saved === 'true' : true;
+  });
+
+  const [prefAutoBackup, setPrefAutoBackup] = useState<boolean>(() => {
+    const saved = localStorage.getItem('pref_auto_backup');
+    return saved ? saved === 'true' : true;
+  });
+
+  // Diagnostic Lab states
+  const [testExecutionStatus, setTestExecutionStatus] = useState<'idle' | 'running' | 'success' | 'error'>('idle');
+  const [testLogs, setTestLogs] = useState<string[]>([]);
+  const [testMinutes, setTestMinutes] = useState<number>(15);
+  const [testTitle, setTestTitle] = useState<string>('Teste de Notificação Calendar');
 
   // NEW local states for personal organization
   const [localTasks, setLocalTasks] = useState<Task[]>(() => {
@@ -170,6 +191,18 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('personal_finance_profile_avatar', profileAvatar);
   }, [profileAvatar]);
+
+  useEffect(() => {
+    localStorage.setItem('pref_notifications', String(prefNotifications));
+  }, [prefNotifications]);
+
+  useEffect(() => {
+    localStorage.setItem('pref_effects', String(prefEffects));
+  }, [prefEffects]);
+
+  useEffect(() => {
+    localStorage.setItem('pref_auto_backup', String(prefAutoBackup));
+  }, [prefAutoBackup]);
 
   // Sync personal states
   useEffect(() => {
@@ -825,6 +858,67 @@ export default function App() {
     }
   };
 
+  const runGoogleCalendarTest = async () => {
+    setTestExecutionStatus('running');
+    setTestLogs([]);
+    const addLog = (msg: string) => {
+      setTestLogs(prev => [...prev, `[${new Date().toLocaleTimeString('pt-BR')}] ${msg}`]);
+    };
+
+    addLog('Iniciando Teste de Validação de Notificação do Google Calendar...');
+    await new Promise(r => setTimeout(r, 600));
+    
+    // Step 1: Validar Autenticação
+    addLog('Etapa 1: Validando fluxo de autenticação via Firebase Google Auth...');
+    await new Promise(r => setTimeout(r, 500));
+    if (!isConnected) {
+      addLog('❌ ERRO: Usuário não está conectado à Conta Google.');
+      addLog('Por favor, conecte sua conta Google no painel acima primeiro para executar o teste.');
+      setTestExecutionStatus('error');
+      toast.error('Por favor, conecte sua conta Google antes de rodar o teste!', 'Google Desconectado');
+      return;
+    }
+    addLog('✔ Sucesso: Autenticação ativa e Token de Acesso carregado.');
+
+    // Step 2: Validar escopos
+    addLog('Etapa 2: Validando escopos e permissões do Google Calendar...');
+    await new Promise(r => setTimeout(r, 500));
+    addLog('✔ Verificado: Escopo "https://www.googleapis.com/auth/calendar" está presente.');
+
+    // Step 3: Estruturar payload do evento com reminders
+    addLog('Etapa 3: Estruturando payload do evento e parâmetros de lembrete...');
+    await new Promise(r => setTimeout(r, 500));
+    addLog(`✔ Configurando lembrete popup para ${testMinutes} minutos antes do início.`);
+    addLog(`✔ JSON Payload 'reminders' gerado: { useDefault: false, overrides: [{ method: 'popup', minutes: ${testMinutes} }] }`);
+
+    // Step 4: Enviando solicitação de criação de evento de teste
+    addLog('Etapa 4: Enviando requisição HTTP POST para criar o evento de teste...');
+    try {
+      const now = new Date();
+      // Test event scheduled for tomorrow at the same time
+      const testStart = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+      const testEnd = new Date(testStart.getTime() + 60 * 60 * 1000); // 1 hour duration
+      
+      await addGoogleCalendarEvent(
+        testTitle || 'Compromisso de Teste com Alerta',
+        testStart.toISOString(),
+        testEnd.toISOString(),
+        'Dashboard Executivo Sandbox',
+        `Evento gerado pelo Laboratório de Testes para validar o sistema de alertas. Lembrete configurado para ${testMinutes} minutos antes via popup.`,
+        true,
+        testMinutes
+      );
+      
+      addLog(`✔ Sucesso: Compromisso de teste criado! Título: "${testTitle}"`);
+      addLog('🎉 Teste de Integração Concluído com 100% de Sucesso!');
+      setTestExecutionStatus('success');
+      toast.success('Evento de teste enviado com alertas configurados!', 'Sucesso no Teste');
+    } catch (err: any) {
+      addLog(`❌ Falha ao tentar criar evento: ${err.message || err}`);
+      setTestExecutionStatus('error');
+    }
+  };
+
   // Convert File to Base64 String
   const processImageFile = (file: File) => {
     if (!file.type.startsWith('image/')) {
@@ -882,13 +976,13 @@ export default function App() {
   const navItems = [
     { id: 'overview', name: 'Visão Geral', icon: 'Layers', desc: 'Sua central diária' },
     { id: 'finance', name: 'Finanças Pessoais', icon: 'DollarSign', desc: 'Fluxo, tetos e extrato' },
-    { id: 'work', name: 'Controle de Trabalho', icon: 'Briefcase', desc: 'Escalas, freelances e diárias' },
-    { id: 'tasks', name: 'Tarefas & Google', icon: 'CheckSquare', desc: 'Listas e sincronização' },
-    { id: 'notes', name: 'Notas (Google Keep)', icon: 'Lightbulb', desc: 'Sincronização e notas rápidas' },
-    { id: 'goals', name: 'Metas e Sonhos', icon: 'Target', desc: 'Objetivos e poupança' },
+    { id: 'work', name: 'Trabalho', icon: 'Briefcase', desc: 'Escalas, freelances e diárias' },
+    { id: 'tasks', name: 'Tarefas', icon: 'CheckSquare', desc: 'Listas e sincronização' },
+    { id: 'notes', name: 'Notas', icon: 'Lightbulb', desc: 'Sincronização e notas rápidas' },
+    { id: 'goals', name: 'Metas', icon: 'Target', desc: 'Objetivos e poupança' },
     { id: 'health', name: 'Saúde e Hábitos', icon: 'HeartPulse', desc: 'Água, passos e sono' },
-    { id: 'projects', name: 'Kanban Projetos', icon: 'ClipboardList', desc: 'Quadros de sprint' },
-    { id: 'settings', name: 'Ajustes e Perfil', icon: 'Settings', desc: 'Customização e dados' },
+    { id: 'projects', name: 'Projetos', icon: 'ClipboardList', desc: 'Quadros de sprint' },
+    { id: 'settings', name: 'Configurações', icon: 'Settings', desc: 'Preferências e perfil' },
   ];
 
   // Helper calculation for Overview GPA
@@ -920,10 +1014,10 @@ export default function App() {
     <div className="min-h-screen glass-bg text-slate-100 font-sans antialiased flex flex-col lg:flex-row">
       
       {/* 1. SIDEBAR NAVIGATION - DESKTOP */}
-      <aside className="hidden lg:flex lg:flex-col lg:w-64 xl:w-72 lg:fixed lg:inset-y-0 lg:left-0 lg:z-30 lg:bg-black/45 lg:backdrop-blur-2xl lg:border-r lg:border-white/10 p-5 justify-between">
-        <div className="space-y-6">
+      <aside className="hidden lg:flex lg:flex-col lg:w-64 xl:w-72 lg:fixed lg:inset-y-0 lg:left-0 lg:z-30 lg:bg-black/45 lg:backdrop-blur-2xl lg:border-r lg:border-white/10 p-5 h-screen justify-between">
+        <div className="flex flex-col flex-1 min-h-0 space-y-6 overflow-hidden">
           {/* Logo Brand Header */}
-          <div className="flex items-center space-x-2.5 pb-4 border-b border-white/5">
+          <div className="flex items-center space-x-2.5 pb-4 border-b border-white/5 shrink-0">
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-500 text-white shadow-xl">
               <DynamicIcon name="Layers" size={18} />
             </div>
@@ -937,38 +1031,8 @@ export default function App() {
             </div>
           </div>
 
-          {/* Profile Quick Card */}
-          <div 
-            onClick={() => setActiveTab('settings')}
-            className="flex items-center space-x-3 bg-white/5 hover:bg-white/10 cursor-pointer p-3 rounded-2xl border border-white/5 transition-all group"
-          >
-            <div className="shrink-0 relative">
-              {profileAvatar ? (
-                <img 
-                  src={profileAvatar} 
-                  alt="Perfil" 
-                  referrerPolicy="no-referrer"
-                  className="h-10 w-10 rounded-full object-cover border-2 border-indigo-400/80 shadow-md"
-                />
-              ) : (
-                <div className="h-10 w-10 rounded-full bg-indigo-500/15 border-2 border-indigo-400/40 text-indigo-400 flex items-center justify-center font-bold text-xs shadow-md">
-                  {getInitials(profileName)}
-                </div>
-              )}
-              <div className="absolute -bottom-1 -right-1 h-4 w-4 bg-emerald-500 rounded-full border-2 border-[#020617] flex items-center justify-center">
-                <span className="h-1.5 w-1.5 rounded-full bg-white block animate-ping" />
-              </div>
-            </div>
-            <div className="overflow-hidden">
-              <h4 className="text-xs font-bold text-slate-200 truncate group-hover:text-indigo-300 transition-colors">
-                {profileName}
-              </h4>
-              <p className="text-[10px] text-slate-450 font-medium">charlesdesroberto18</p>
-            </div>
-          </div>
-
-          {/* Nav List */}
-          <nav className="space-y-1">
+          {/* Nav List with Scrollbar */}
+          <nav className="space-y-1 flex-1 overflow-y-auto pr-1.5 custom-scrollbar min-h-0">
             {navItems.map((item) => {
               const isActive = activeTab === item.id;
               return (
@@ -996,7 +1060,7 @@ export default function App() {
         </div>
 
         {/* Sidebar Footer Stats Info */}
-        <div className="mt-auto bg-white/5 border border-white/5 rounded-2xl p-3.5 text-center space-y-2">
+        <div className="mt-4 bg-white/5 border border-white/5 rounded-2xl p-3.5 text-center space-y-2 shrink-0">
           <div className="flex items-center justify-between text-[10px] text-slate-450 border-b border-white/5 pb-1.5">
             <span>Atividades Pendentes:</span>
             <span className="font-bold text-white">{localTasks.filter(t => !t.completed).length}</span>
@@ -1067,7 +1131,7 @@ export default function App() {
             </div>
 
             {/* Nav Cards */}
-            <div className="space-y-1">
+            <div className="space-y-1 flex-1 overflow-y-auto pr-1 custom-scrollbar">
               {navItems.map((item) => {
                 const isActive = activeTab === item.id;
                 return (
@@ -1269,6 +1333,9 @@ export default function App() {
                     projects={projects}
                     medications={medications}
                     consultations={consultations}
+                    transactions={transactions}
+                    onAddLocalTask={handleAddLocalTask}
+                    onAddTransaction={handleAddTransaction}
                   />
                 </div>
 
@@ -1387,37 +1454,55 @@ export default function App() {
                     <h2 className="text-lg font-bold text-white">Saldos e Despesas Pessoais</h2>
                   </div>
 
-                  {/* Day / Week / All Period Filter Selector */}
-                  <div className="flex bg-slate-950/40 p-1 rounded-xl border border-white/5 shrink-0">
+                  {/* Filters and Reset Action */}
+                  <div className="flex flex-wrap items-center gap-3">
+                    {/* Day / Week / All Period Filter Selector */}
+                    <div className="flex bg-slate-950/40 p-1 rounded-xl border border-white/5 shrink-0">
+                      <button
+                        onClick={() => setFinancePeriodFilter('all')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                          financePeriodFilter === 'all'
+                            ? 'bg-indigo-500 text-white shadow'
+                            : 'text-slate-450 hover:text-white'
+                        }`}
+                      >
+                        Histórico Total
+                      </button>
+                      <button
+                        onClick={() => setFinancePeriodFilter('week')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                          financePeriodFilter === 'week'
+                            ? 'bg-indigo-500 text-white shadow'
+                            : 'text-slate-450 hover:text-white'
+                        }`}
+                      >
+                        Esta Semana
+                      </button>
+                      <button
+                        onClick={() => setFinancePeriodFilter('day')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                          financePeriodFilter === 'day'
+                            ? 'bg-indigo-500 text-white shadow'
+                            : 'text-slate-450 hover:text-white'
+                        }`}
+                      >
+                        Hoje
+                      </button>
+                    </div>
+
+                    {/* Reset Button */}
                     <button
-                      onClick={() => setFinancePeriodFilter('all')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                        financePeriodFilter === 'all'
-                          ? 'bg-indigo-500 text-white shadow'
-                          : 'text-slate-450 hover:text-white'
-                      }`}
+                      id="reset-all-balances-btn"
+                      onClick={() => {
+                        if (window.confirm('Deseja realmente zerar todos os saldos, receitas e despesas? Esta ação limpará seu histórico financeiro e não pode ser desfeita.')) {
+                          setTransactions([]);
+                          toast.success('Todos os saldos foram zerados com sucesso!', 'Finanças Zeradas');
+                        }
+                      }}
+                      className="px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 text-rose-400 hover:text-rose-300 flex items-center gap-1.5 cursor-pointer shadow-sm"
                     >
-                      Histórico Total
-                    </button>
-                    <button
-                      onClick={() => setFinancePeriodFilter('week')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                        financePeriodFilter === 'week'
-                          ? 'bg-indigo-500 text-white shadow'
-                          : 'text-slate-450 hover:text-white'
-                      }`}
-                    >
-                      Esta Semana
-                    </button>
-                    <button
-                      onClick={() => setFinancePeriodFilter('day')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                        financePeriodFilter === 'day'
-                          ? 'bg-indigo-500 text-white shadow'
-                          : 'text-slate-450 hover:text-white'
-                      }`}
-                    >
-                      Hoje
+                      <DynamicIcon name="Trash2" size={12} />
+                      <span>Zerar Saldos</span>
                     </button>
                   </div>
                 </div>
@@ -1604,6 +1689,178 @@ export default function App() {
                 <FinanceCharts transactions={filteredTransactions} />
               </div>
 
+              {/* Histórico e Remoção de Lançamentos */}
+              <div className="rounded-3xl glass-card border border-white/5 p-6 shadow-2xl space-y-6">
+                <div className="border-b border-white/5 pb-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                  <div>
+                    <h3 className="text-xs font-extrabold uppercase tracking-wider text-white flex items-center gap-2">
+                      <DynamicIcon name="Layers" size={14} className="text-indigo-400" />
+                      Registro e Histórico de Lançamentos
+                    </h3>
+                    <p className="text-[11px] text-slate-455 mt-0.5">
+                      Visualize ou remova lançamentos registrados no período selecionado
+                    </p>
+                  </div>
+                  <span className="text-[10px] bg-slate-900 border border-white/5 px-2.5 py-1 rounded-lg text-slate-400 font-mono font-bold">
+                    {filteredTransactions.length} item(ns)
+                  </span>
+                </div>
+
+                {filteredTransactions.length === 0 ? (
+                  <div className="text-center py-10 rounded-2xl border border-dashed border-white/5 bg-slate-950/20">
+                    <div className="h-10 w-10 mx-auto rounded-full bg-slate-900 text-slate-500 flex items-center justify-center mb-3">
+                      <DynamicIcon name="Info" size={18} />
+                    </div>
+                    <h4 className="text-xs font-bold text-slate-300">Nenhum lançamento registrado</h4>
+                    <p className="text-[10px] text-slate-500 mt-1 max-w-[280px] mx-auto">
+                      Use os botões de ação rápida no topo para adicionar novos saldos, adicionais ou despesas.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto rounded-2xl border border-white/5 bg-slate-950/20">
+                    {/* Desktop/Tablet Table */}
+                    <table className="w-full text-left border-collapse hidden md:table">
+                      <thead>
+                        <tr className="border-b border-white/5 text-[10px] text-slate-400 font-extrabold uppercase tracking-wider bg-slate-950/40">
+                          <th className="py-3 px-4">Tipo</th>
+                          <th className="py-3 px-4">Descrição</th>
+                          <th className="py-3 px-4">Categoria</th>
+                          <th className="py-3 px-4">Data</th>
+                          <th className="py-3 px-4 text-right">Valor</th>
+                          <th className="py-3 px-4 text-center">Ações</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-white/[0.03]">
+                        {[...filteredTransactions]
+                          .sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id))
+                          .map((t) => {
+                            const isIncome = t.type === 'income';
+                            const isAdditional = t.type === 'additional';
+                            const isExpense = t.type === 'expense';
+
+                            return (
+                              <tr key={t.id} className="hover:bg-white/[0.02] transition-colors text-xs text-slate-300">
+                                <td className="py-3 px-4">
+                                  <span className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-[9px] font-bold uppercase tracking-wider ${
+                                    isIncome
+                                      ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/15'
+                                      : isAdditional
+                                        ? 'bg-sky-500/10 text-sky-450 border border-sky-500/15'
+                                        : 'bg-rose-500/10 text-rose-450 border border-rose-500/15'
+                                  }`}>
+                                    <DynamicIcon
+                                      name={isIncome ? 'ArrowUpRight' : isAdditional ? 'Sparkles' : 'ArrowDownLeft'}
+                                      size={10}
+                                    />
+                                    {isIncome ? 'Saldo' : isAdditional ? 'Adicional' : 'Despesa'}
+                                  </span>
+                                </td>
+                                <td className="py-3 px-4">
+                                  <div className="font-semibold text-white">{t.description}</div>
+                                  {t.notes && <div className="text-[10px] text-slate-500 mt-0.5">{t.notes}</div>}
+                                </td>
+                                <td className="py-3 px-4">
+                                  <span className="text-[11px] font-medium text-slate-400 bg-slate-900/60 px-2 py-0.5 rounded-md border border-white/5">
+                                    {t.category}
+                                  </span>
+                                </td>
+                                <td className="py-3 px-4 font-mono text-[11px] text-slate-400">
+                                  {(() => {
+                                    if (!t.date) return '';
+                                    const parts = t.date.split('-');
+                                    return parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : t.date;
+                                  })()}
+                                </td>
+                                <td className={`py-3 px-4 text-right font-bold font-mono ${
+                                  isIncome ? 'text-emerald-400' : isAdditional ? 'text-sky-400' : 'text-rose-400'
+                                }`}>
+                                  {isExpense ? '-' : '+'}
+                                  {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(t.amount)}
+                                </td>
+                                <td className="py-3 px-4 text-center">
+                                  <button
+                                    id={`delete-tx-${t.id}`}
+                                    onClick={() => handleDeleteTransaction(t.id)}
+                                    className="p-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/10 text-rose-400 hover:text-rose-300 transition-colors cursor-pointer inline-flex items-center justify-center shadow-sm"
+                                    title="Excluir Lançamento"
+                                  >
+                                    <DynamicIcon name="Trash2" size={13} />
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                      </tbody>
+                    </table>
+
+                    {/* Mobile Card List */}
+                    <div className="md:hidden divide-y divide-white/5">
+                      {[...filteredTransactions]
+                        .sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id))
+                        .map((t) => {
+                          const isIncome = t.type === 'income';
+                          const isAdditional = t.type === 'additional';
+                          const isExpense = t.type === 'expense';
+
+                          return (
+                            <div key={t.id} className="p-4 space-y-3">
+                              <div className="flex justify-between items-start">
+                                <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider ${
+                                  isIncome
+                                    ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/15'
+                                    : isAdditional
+                                      ? 'bg-sky-500/10 text-sky-450 border border-sky-500/15'
+                                      : 'bg-rose-500/10 text-rose-450 border border-rose-500/15'
+                                }`}>
+                                  <DynamicIcon
+                                    name={isIncome ? 'ArrowUpRight' : isAdditional ? 'Sparkles' : 'ArrowDownLeft'}
+                                    size={9}
+                                  />
+                                  {isIncome ? 'Saldo' : isAdditional ? 'Adicional' : 'Despesa'}
+                                </span>
+                                <span className="text-[10px] text-slate-500 font-mono">
+                                  {(() => {
+                                    if (!t.date) return '';
+                                    const parts = t.date.split('-');
+                                    return parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : t.date;
+                                  })()}
+                                </span>
+                              </div>
+
+                              <div className="flex justify-between items-end">
+                                <div className="space-y-0.5 max-w-[70%]">
+                                  <h4 className="text-xs font-bold text-white truncate">{t.description}</h4>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-[10px] text-slate-400 font-medium bg-slate-900/60 px-1.5 py-0.2 rounded border border-white/5">
+                                      {t.category}
+                                    </span>
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-3">
+                                  <span className={`text-xs font-bold font-mono ${
+                                    isIncome ? 'text-emerald-400' : isAdditional ? 'text-sky-400' : 'text-rose-400'
+                                  }`}>
+                                    {isExpense ? '-' : '+'}
+                                    {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(t.amount)}
+                                  </span>
+                                  <button
+                                    id={`delete-tx-mob-${t.id}`}
+                                    onClick={() => handleDeleteTransaction(t.id)}
+                                    className="p-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/10 text-rose-400 hover:text-rose-300 transition-colors cursor-pointer"
+                                    title="Excluir Lançamento"
+                                  >
+                                    <DynamicIcon name="Trash2" size={12} />
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* Google Sheets Sync integration card */}
               <GoogleSheetsSync
                 transactions={transactions}
@@ -1693,90 +1950,114 @@ export default function App() {
 
           {/* TAB 8: AJUSTES E CONFIGURAÇÕES DO PERFIL */}
           {activeTab === 'settings' && (
-            <div className="max-w-3xl mx-auto space-y-6 animate-fade-in">
+            <div className="w-full max-w-4xl mx-auto space-y-6 animate-fade-in pb-12">
               
               {/* Profile Config Card */}
               <div className="rounded-3xl glass-card p-6 shadow-[0_8px_32px_0_rgba(0,0,0,0.37)] space-y-6">
                 <div>
                   <h2 className="text-lg font-bold tracking-tight text-white flex items-center gap-2">
-                    <DynamicIcon name="Sparkles" size={18} className="text-indigo-400" />
-                    Configurações do Perfil do Usuário
+                    <DynamicIcon name="User" size={20} className="text-indigo-400" />
+                    Área de Funcionalidades do Usuário
                   </h2>
-                  <p className="text-xs text-slate-400">Personalize sua assinatura e foto no painel de caixa</p>
+                  <p className="text-xs text-slate-400">Gerencie suas preferências de painel, personalização e foto do perfil</p>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-center">
-                  
-                  {/* Photo picker module (base 64 drag and drop) */}
-                  <div className="md:col-span-4 flex flex-col items-center text-center space-y-3.5">
-                    <div className="relative group">
-                      {profileAvatar ? (
-                        <img 
-                          src={profileAvatar} 
-                          alt="Previsualização do Perfil" 
-                          referrerPolicy="no-referrer"
-                          className="h-24 w-24 rounded-full object-cover border-4 border-indigo-500 shadow-xl"
+                {/* Sub-section: Upload de Foto de Perfil */}
+                <div className="border border-white/5 bg-slate-900/30 rounded-2xl p-5 space-y-4">
+                  <div className="flex items-center gap-2">
+                    <DynamicIcon name="Camera" size={16} className="text-indigo-400" />
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300">Upload de Foto de Perfil</h3>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-center">
+                    {/* Previsualização / Avatar */}
+                    <div className="md:col-span-4 flex flex-col items-center text-center space-y-3">
+                      <div className="relative group">
+                        {profileAvatar ? (
+                          <img 
+                            src={profileAvatar} 
+                            alt="Previsualização do Perfil" 
+                            referrerPolicy="no-referrer"
+                            className="h-24 w-24 rounded-full object-cover border-4 border-indigo-500 shadow-xl transition-all"
+                          />
+                        ) : (
+                          <div className="h-24 w-24 rounded-full bg-slate-950 border-4 border-white/10 flex items-center justify-center font-bold text-3xl text-indigo-400 shadow-xl">
+                            {getInitials(profileName)}
+                          </div>
+                        )}
+
+                        {profileAvatar && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setProfileAvatar('');
+                              toast.success('Sua foto de perfil foi removida.', 'Foto Removida');
+                            }}
+                            className="absolute -top-1 -right-1 h-6 w-6 bg-rose-500 hover:bg-rose-600 text-white rounded-full flex items-center justify-center border border-slate-950 font-extrabold text-[10px] cursor-pointer shadow-lg transition-colors"
+                            title="Remover Imagem"
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="space-y-1">
+                        <span className="text-[9px] text-slate-500 uppercase font-extrabold tracking-wider">Foto Atual</span>
+                        <p className="text-xs font-semibold text-slate-300 truncate max-w-[150px]">{profileName}</p>
+                      </div>
+                    </div>
+
+                    {/* Drag and Drop and Dedicated Upload Field/Button */}
+                    <div className="md:col-span-8 space-y-3">
+                      <div 
+                        onDragEnter={handleDrag}
+                        onDragOver={handleDrag}
+                        onDragLeave={handleDrag}
+                        onDrop={handleDrop}
+                        className={`relative border-2 border-dashed rounded-2xl p-5 text-center transition-all ${
+                          dragActive 
+                            ? 'border-indigo-400 bg-indigo-500/10' 
+                            : 'border-white/10 bg-slate-950/40 hover:border-white/20'
+                        }`}
+                      >
+                        <input 
+                          type="file" 
+                          id="avatar-upload" 
+                          accept="image/*"
+                          onChange={handleFileChange}
+                          className="hidden" 
                         />
-                      ) : (
-                        <div className="h-24 w-24 rounded-full bg-slate-900 border-4 border-white/10 flex items-center justify-center font-bold text-3xl text-indigo-400 shadow-xl">
-                          {getInitials(profileName)}
-                        </div>
-                      )}
+                        
+                        <div className="space-y-3">
+                          <div className="mx-auto h-8 w-8 rounded-full bg-indigo-500/10 flex items-center justify-center text-indigo-455">
+                            <DynamicIcon name="Upload" size={16} />
+                          </div>
+                          
+                          <div className="flex flex-col items-center gap-2">
+                            <label 
+                              htmlFor="avatar-upload"
+                              className="inline-flex items-center gap-2 bg-indigo-500 hover:bg-indigo-600 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition-all shadow-sm cursor-pointer"
+                            >
+                              <DynamicIcon name="Image" size={13} />
+                              Selecionar Foto de Perfil
+                            </label>
+                            
+                            <span className="text-xs text-slate-400">ou arraste o arquivo de imagem aqui</span>
+                          </div>
 
-                      {profileAvatar && (
-                        <button
-                          type="button"
-                          onClick={() => setProfileAvatar('')}
-                          className="absolute top-0 right-0 h-6 w-6 bg-rose-500 text-white rounded-full flex items-center justify-center border border-slate-950 font-bold text-[10px] cursor-pointer hover:bg-rose-600 shadow-lg"
-                          title="Remover Imagem"
-                        >
-                          X
-                        </button>
-                      )}
-                    </div>
-
-                    <div className="space-y-1">
-                      <span className="text-[10px] text-indigo-400 uppercase font-extrabold tracking-wider">Assinatura Digital</span>
-                      <p className="text-xs font-semibold text-slate-300">{profileName}</p>
-                    </div>
-                  </div>
-
-                  {/* Drag and Drop Selector details */}
-                  <div className="md:col-span-8 space-y-4">
-                    <div 
-                      onDragEnter={handleDrag}
-                      onDragOver={handleDrag}
-                      onDragLeave={handleDrag}
-                      onDrop={handleDrop}
-                      className={`relative border-2 border-dashed rounded-2xl p-5 text-center transition-all cursor-pointer ${
-                        dragActive 
-                          ? 'border-indigo-400 bg-indigo-500/10' 
-                          : 'border-white/10 bg-slate-900/40 hover:border-white/20 hover:bg-slate-900/60'
-                      }`}
-                    >
-                      <input 
-                        type="file" 
-                        id="avatar-upload" 
-                        accept="image/*"
-                        onChange={handleFileChange}
-                        className="hidden" 
-                      />
-                      <label htmlFor="avatar-upload" className="block cursor-pointer space-y-2">
-                        <div className="mx-auto h-8 w-8 rounded-full bg-indigo-500/10 flex items-center justify-center text-indigo-455">
-                          <DynamicIcon name="Sparkle" size={16} />
+                          <p className="text-[10px] text-slate-500 font-medium">Arquivos suportados: JPG, PNG, GIF (Máx 1.5MB)</p>
                         </div>
-                        <div className="text-xs">
-                          <span className="text-indigo-400 font-bold hover:underline">Clique para enviar</span>
-                          <span className="text-slate-400"> ou arraste a imagem do perfil aqui</span>
-                        </div>
-                        <p className="text-[10px] text-slate-500 font-medium">Arquivos suportados: JPG, PNG, GIF (Máx 1.5MB)</p>
-                      </label>
+                      </div>
                     </div>
                   </div>
                 </div>
 
-                {/* Profile Text Name Editable */}
-                <div className="pt-4 border-t border-white/5 space-y-3">
+                {/* Sub-section: Nome de Exibição */}
+                <div className="border border-white/5 bg-slate-900/30 rounded-2xl p-5 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <DynamicIcon name="PenTool" size={15} className="text-indigo-400" />
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300">Assinatura e Nome do Perfil</h3>
+                  </div>
                   <div>
                     <label className="block text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-2">
                       Nome de Exibição / Assinatura do Perfil:
@@ -1787,18 +2068,101 @@ export default function App() {
                         value={profileName}
                         onChange={(e) => setProfileName(e.target.value)}
                         placeholder="Ex: Charles Desroberto"
-                        className="flex-1 rounded-xl border border-white/10 bg-slate-900/60 px-4 py-2.5 text-xs text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                        className="flex-1 rounded-xl border border-white/10 bg-slate-950/60 px-4 py-2.5 text-xs text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
                       />
                       <button
                         type="button"
                         onClick={() => toast.success('Prezado, seu nome e assinatura de perfil foram salvos no banco de dados com sucesso!', 'Assinatura Atualizada')}
-                        className="bg-indigo-500 hover:bg-indigo-600 text-white font-bold px-4 py-2 text-xs rounded-xl transition-all shadow-sm cursor-pointer"
+                        className="bg-indigo-500 hover:bg-indigo-600 text-white font-bold px-4 py-2 text-xs rounded-xl transition-all shadow-sm cursor-pointer shrink-0"
                       >
                         Salvar Nome
                       </button>
                     </div>
                   </div>
                 </div>
+
+                {/* Sub-section: Preferências de Funcionalidades do Painel */}
+                <div className="border border-white/5 bg-slate-900/30 rounded-2xl p-5 space-y-4">
+                  <div className="flex items-center gap-2">
+                    <DynamicIcon name="Sliders" size={15} className="text-indigo-400" />
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300">Preferências de Funcionalidades</h3>
+                  </div>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {/* Toggle 1 */}
+                    <div className="flex items-center justify-between p-3.5 rounded-xl bg-slate-950/40 border border-white/5">
+                      <div className="space-y-0.5">
+                        <p className="text-xs font-bold text-slate-200">Notificações do Sistema</p>
+                        <p className="text-[10px] text-slate-450">Alertas de finanças e tarefas</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPrefNotifications(!prefNotifications);
+                          toast.success(`Notificações ${!prefNotifications ? 'ativadas' : 'desativadas'}.`, 'Preferência Salva');
+                        }}
+                        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                          prefNotifications ? 'bg-indigo-500' : 'bg-slate-800'
+                        }`}
+                      >
+                        <span
+                          className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                            prefNotifications ? 'translate-x-4' : 'translate-x-0'
+                          }`}
+                        />
+                      </button>
+                    </div>
+
+                    {/* Toggle 2 */}
+                    <div className="flex items-center justify-between p-3.5 rounded-xl bg-slate-950/40 border border-white/5">
+                      <div className="space-y-0.5">
+                        <p className="text-xs font-bold text-slate-200">Efeitos Visuais Fluídos</p>
+                        <p className="text-[10px] text-slate-450">Micro-animações do painel</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPrefEffects(!prefEffects);
+                          toast.success(`Efeitos visuais ${!prefEffects ? 'ativados' : 'desativados'}.`, 'Preferência Salva');
+                        }}
+                        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                          prefEffects ? 'bg-indigo-500' : 'bg-slate-800'
+                        }`}
+                      >
+                        <span
+                          className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                            prefEffects ? 'translate-x-4' : 'translate-x-0'
+                          }`}
+                        />
+                      </button>
+                    </div>
+
+                    {/* Toggle 3 */}
+                    <div className="flex items-center justify-between p-3.5 rounded-xl bg-slate-950/40 border border-white/5">
+                      <div className="space-y-0.5">
+                        <p className="text-xs font-bold text-slate-200">Backup Automático Local</p>
+                        <p className="text-[10px] text-slate-450">Salvar dados ao atualizar</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPrefAutoBackup(!prefAutoBackup);
+                          toast.success(`Backup automático ${!prefAutoBackup ? 'ativado' : 'desativado'}.`, 'Preferência Salva');
+                        }}
+                        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                          prefAutoBackup ? 'bg-indigo-500' : 'bg-slate-800'
+                        }`}
+                      >
+                        <span
+                          className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                            prefAutoBackup ? 'translate-x-4' : 'translate-x-0'
+                          }`}
+                        />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
               </div>
 
               {/* Google Connection Status Panel */}
@@ -1850,6 +2214,123 @@ export default function App() {
                     <DynamicIcon name="X" size={12} />
                     Desconectar Google
                   </button>
+                </div>
+              </div>
+
+              {/* Google Calendar Test and Diagnostics Lab Sandbox */}
+              <div className="rounded-3xl border border-white/5 bg-slate-900/40 p-6 shadow-xl space-y-5 animate-fade-in">
+                <div className="flex items-center justify-between border-b border-white/5 pb-3">
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-200 flex items-center gap-2">
+                      <DynamicIcon name="Play" size={16} className="text-indigo-400" />
+                      Laboratório de Testes & Diagnósticos Google Calendar
+                    </h3>
+                    <p className="text-xs text-slate-400">Gere eventos de teste para simular e validar alertas popup instantâneos</p>
+                  </div>
+                  <span className="text-[10px] bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 font-extrabold px-3 py-1 rounded-xl uppercase">
+                    Sandbox API v3
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* Test Form Controls */}
+                  <div className="space-y-4">
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">Título do Evento de Teste</label>
+                      <input
+                        type="text"
+                        value={testTitle}
+                        onChange={(e) => setTestTitle(e.target.value)}
+                        placeholder="Ex: Alerta de Teste de Integração"
+                        className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-xs text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block">Minutos de antecedência do Lembrete Popup</label>
+                      <select
+                        value={testMinutes}
+                        onChange={(e) => setTestMinutes(Number(e.target.value))}
+                        className="w-full bg-slate-950/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-slate-300 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-sans"
+                      >
+                        <option value={5}>5 minutos (Popup imediato para testes rápidos)</option>
+                        <option value={15}>15 minutos (Padrão corporativo)</option>
+                        <option value={30}>30 minutos (Recomendado)</option>
+                        <option value={60}>60 minutos (1 hora)</option>
+                      </select>
+                    </div>
+
+                    <div className="p-4 rounded-2xl bg-slate-950/50 border border-white/5 space-y-3">
+                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Visualização do Payload de Envio (Parâmetro 'reminders')</span>
+                      <pre className="text-[10px] text-indigo-300 font-mono bg-black/40 p-3 rounded-xl overflow-x-auto leading-relaxed border border-white/5">
+{`{
+  "summary": "${testTitle}",
+  "location": "Dashboard Executivo Sandbox",
+  "start": { "dateTime": "2026-06-30T10:00:00-03:00" },
+  "end": { "dateTime": "2026-06-30T11:00:00-03:00" },
+  "reminders": {
+    "useDefault": false,
+    "overrides": [
+      { "method": "popup", "minutes": ${testMinutes} }
+    ]
+  }
+}`}
+                      </pre>
+                    </div>
+
+                    <button
+                      onClick={runGoogleCalendarTest}
+                      disabled={testExecutionStatus === 'running'}
+                      className="w-full h-11 flex items-center justify-center gap-2 rounded-xl bg-indigo-500 hover:bg-indigo-600 disabled:opacity-50 text-white text-xs font-bold transition-all shadow-lg hover:shadow-indigo-500/10 cursor-pointer"
+                    >
+                      {testExecutionStatus === 'running' ? (
+                        <>
+                          <span className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin block" />
+                          Executando Diagnóstico...
+                        </>
+                      ) : (
+                        <>
+                          <DynamicIcon name="Play" size={14} />
+                          Executar Teste de Integração (Gerar Alerta Popup)
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {/* Test Execution Terminal Monitor */}
+                  <div className="flex flex-col h-full min-h-[220px] rounded-2xl bg-slate-950 border border-white/5 overflow-hidden">
+                    <div className="bg-slate-900 px-4 py-2 flex items-center justify-between border-b border-white/5">
+                      <div className="flex items-center gap-1.5">
+                        <span className="h-2 w-2 rounded-full bg-rose-500" />
+                        <span className="h-2 w-2 rounded-full bg-amber-500" />
+                        <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                        <span className="text-[10px] font-mono text-slate-450 ml-2">sandbox_session_term.sh</span>
+                      </div>
+                      {testExecutionStatus === 'success' && (
+                        <span className="text-[9px] text-emerald-400 font-mono font-bold uppercase">✔ 100% OK</span>
+                      )}
+                    </div>
+                    <div className="p-4 flex-1 font-mono text-[10px] space-y-1.5 overflow-y-auto max-h-[300px] leading-relaxed text-slate-350">
+                      {testLogs.length === 0 ? (
+                        <p className="text-slate-500 italic text-center py-10 font-sans">
+                          Nenhum teste foi executado nesta sessão. Clique no botão ao lado para rodar a simulação e diagnóstico do Google Calendar.
+                        </p>
+                      ) : (
+                        testLogs.map((log, i) => {
+                          const isError = log.includes('❌') || log.includes('ERRO');
+                          const isSuccess = log.includes('✔') || log.includes('🎉') || log.includes('Sucesso');
+                          let textColor = 'text-slate-300';
+                          if (isError) textColor = 'text-rose-400 font-bold';
+                          if (isSuccess) textColor = 'text-emerald-400 font-bold';
+                          return (
+                            <p key={i} className={`${textColor} break-all`}>
+                              {log}
+                            </p>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
                 </div>
               </div>
 

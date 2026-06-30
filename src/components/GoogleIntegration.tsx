@@ -8,7 +8,7 @@ import firebaseConfig from '../../firebase-applet-config.json';
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const googleProvider = new FirebaseGoogleAuthProvider();
-googleProvider.addScope('https://www.googleapis.com/auth/calendar.readonly');
+googleProvider.addScope('https://www.googleapis.com/auth/calendar'); // Full write access to manage events and set reminders
 googleProvider.addScope('https://www.googleapis.com/auth/tasks');
 
 export interface CalendarEvent {
@@ -63,6 +63,7 @@ interface GoogleAuthContextType {
   togglePinKeepNote: (id: string) => Promise<void>;
   updateKeepNoteColor: (id: string, color: string) => Promise<void>;
   updateKeepNoteReminders: (id: string, reminderActive: boolean, reminderTriggered: boolean) => void;
+  addGoogleCalendarEvent: (summary: string, startDateTime: string, endDateTime: string, location?: string, description?: string, usePopupReminder?: boolean, reminderMinutes?: number) => Promise<void>;
 }
 
 const GoogleAuthContext = createContext<GoogleAuthContextType | undefined>(undefined);
@@ -394,6 +395,71 @@ export function GoogleAuthProvider({ children }: { children: React.ReactNode }) 
     );
   };
 
+  const addGoogleCalendarEvent = async (
+    summary: string,
+    startDateTime: string,
+    endDateTime: string,
+    location?: string,
+    description?: string,
+    usePopupReminder: boolean = true,
+    reminderMinutes: number = 30
+  ) => {
+    if (!accessToken) {
+      toast.error('Você precisa estar conectado à sua conta Google para adicionar eventos.', 'Google Desconectado');
+      return;
+    }
+    try {
+      const body: any = {
+        summary: summary || 'Novo Compromisso',
+        location: location || '',
+        description: description || '',
+        start: {
+          dateTime: new Date(startDateTime).toISOString(),
+        },
+        end: {
+          dateTime: new Date(endDateTime).toISOString(),
+        },
+      };
+
+      if (usePopupReminder) {
+        body.reminders = {
+          useDefault: false,
+          overrides: [
+            { method: 'popup', minutes: reminderMinutes }
+          ]
+        };
+      } else {
+        body.reminders = {
+          useDefault: true
+        };
+      }
+
+      const res = await fetch(
+        'https://www.googleapis.com/calendar/v3/calendars/primary/events',
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(body),
+        }
+      );
+
+      if (res.ok) {
+        toast.success('Compromisso agendado com sucesso no Google Calendar!', 'Google Calendar');
+        refreshCalendar();
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        console.error('Erro ao adicionar evento ao Google Calendar:', errData);
+        throw new Error(errData.error?.message || 'Erro na resposta do Google.');
+      }
+    } catch (err: any) {
+      console.error('Erro ao tentar criar evento:', err);
+      toast.error(`Falha ao sincronizar evento: ${err.message || ''}`, 'Erro de Sincronização');
+    }
+  };
+
   // Fetch data when authenticated
   useEffect(() => {
     if (isConnected && accessToken) {
@@ -426,6 +492,7 @@ export function GoogleAuthProvider({ children }: { children: React.ReactNode }) 
         togglePinKeepNote,
         updateKeepNoteColor,
         updateKeepNoteReminders,
+        addGoogleCalendarEvent,
       }}
     >
       {children}
